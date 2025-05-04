@@ -1,24 +1,24 @@
 import os
 from dotenv import load_dotenv
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 import pandas as pd
 
 # === Load credentials from .env ===
 # Assumes private/.env contains SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', 'private', '.env'))
+load_dotenv()  # Automatically looks for .env in current working directory
 
 CLIENT_ID = os.getenv('SPOTIPY_CLIENT_ID')
 CLIENT_SECRET = os.getenv('SPOTIPY_CLIENT_SECRET')
 REDIRECT_URI = os.getenv('SPOTIPY_REDIRECT_URI')
 
-# Scopes to read user playlists and track details
+# Scopes to read user playlists
 SCOPE = "playlist-read-private playlist-read-collaborative"
 
 
 def get_spotify_client():
     """
-    Authenticate and return a Spotify client using OAuth2.
+    Authenticate and return a Spotify client using OAuth2 for user-specific endpoints.
     """
     auth_manager = SpotifyOAuth(
         client_id=CLIENT_ID,
@@ -27,6 +27,17 @@ def get_spotify_client():
         scope=SCOPE
     )
     return spotipy.Spotify(auth_manager=auth_manager)
+
+
+def get_app_client():
+    """
+    Return a Spotify client using Client Credentials flow for public endpoints like audio-features.
+    """
+    creds = SpotifyClientCredentials(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET
+    )
+    return spotipy.Spotify(client_credentials_manager=creds)
 
 
 def get_user_playlists(sp: spotipy.Spotify) -> pd.DataFrame:
@@ -75,12 +86,13 @@ def fetch_playlist_tracks(sp: spotipy.Spotify, playlist_id: str) -> pd.DataFrame
 
 def fetch_audio_features(sp: spotipy.Spotify, track_ids: list[str]) -> pd.DataFrame:
     """
-    Fetch audio features for up to 50 tracks per request. Returns DataFrame of features.
+    Fetch audio features for up to 50 tracks per request using the app client.
     """
+    sp_app = get_app_client()
     features = []
     for i in range(0, len(track_ids), 50):
         batch = track_ids[i:i+50]
-        features.extend(sp.audio_features(batch))
+        features.extend(sp_app.audio_features(batch))
     return pd.DataFrame(features)
 
 
@@ -92,6 +104,7 @@ def get_playlist_with_features(playlist_id: str) -> pd.DataFrame:
     playlist_df = fetch_playlist_tracks(sp, playlist_id)
     if playlist_df.empty:
         return playlist_df
+
     feature_df = fetch_audio_features(sp, playlist_df['track_id'].tolist())
     combined = playlist_df.merge(feature_df, left_on='track_id', right_on='id', how='left')
     return combined
